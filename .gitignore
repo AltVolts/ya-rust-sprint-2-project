@@ -5,3 +5,4 @@
 **.bin
 /.pre-commit-config.yaml
 !/test_files/**
+**.env

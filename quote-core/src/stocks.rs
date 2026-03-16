@@ -8,7 +8,10 @@ pub struct StockQuote {
 
 impl StockQuote {
     pub fn to_string(&self) -> String {
-        format!("{}|{}|{}|{}", self.ticker, self.price, self.volume, self.timestamp)
+        format!(
+            "{}|{}|{}|{}",
+            self.ticker, self.price, self.volume, self.timestamp
+        )
     }
 
     pub fn from_string(s: &str) -> Option<Self> {
@@ -24,7 +27,7 @@ impl StockQuote {
             None
         }
     }
-    
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(self.ticker.as_bytes());
