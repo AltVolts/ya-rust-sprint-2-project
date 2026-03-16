@@ -1,0 +1,7 @@
+/target
+.idea
+**.txt
+**.csv
+**.bin
+/.pre-commit-config.yaml
+!/test_files/**

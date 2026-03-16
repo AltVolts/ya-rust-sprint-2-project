@@ -1,0 +1,8 @@
+resolver = "3"
+
+[workspace]
+members = [
+    "quote-server",
+    "quote-client",
+    "quote-core",
+]
