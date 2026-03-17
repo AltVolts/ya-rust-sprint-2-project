@@ -1,5 +1,5 @@
-mod generators;
 mod stocks;
+pub mod ticker_list;
 
-pub use generators::QuoteGenerator;
 pub use stocks::StockQuote;
+

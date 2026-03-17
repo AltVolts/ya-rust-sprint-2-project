@@ -1,9 +1,13 @@
+use std::collections::HashSet;
 use anyhow::Result;
 use log::{error, warn};
 use quote_core::QuoteGenerator;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
+use quote_core::ticker_list::get_tickers_from_txt;
+
+const DEFAULT_TICKERS_PATH: &str = "../../tickers.txt";
 
 pub(crate) fn handle_client(stream: TcpStream, quote_generator: Arc<Mutex<QuoteGenerator>>) {
     let mut writer = stream.try_clone().expect("Failed to clone stream");
@@ -70,6 +74,7 @@ fn handle_stream_cmd(
         Some(t) => t,
         None => return "ERROR: missing ticker list\n".to_string(),
     };
+    // Обработка лишних ключей в команде
     if parts.next().is_some() {
         return "ERROR: too many arguments\n".to_string();
     }
@@ -95,34 +100,30 @@ fn handle_stream_cmd(
     }
 
     // Преобразуем host и port в SocketAddr для отправки UDP.
-    // Если host — доменное имя, его нужно будет резолвить при каждой отправке,
-    // либо сохранить строку и резолвить позже. Здесь для простоты попробуем
-    // преобразовать в SocketAddr напрямую (если это IP-адрес).
     let udp_addr: std::net::SocketAddr = match format!("{}:{}", host, port).parse() {
         Ok(addr) => addr,
         Err(_) => {
-            // Если не получилось, можно сохранить host как строку и резолвить динамически.
-            // Для примера вернём ошибку, но в реальности можно поддерживать DNS-имена.
-            return "ERROR: host is not a valid IP address (DNS names not supported yet)\n"
-                .to_string();
+            return "ERROR: host is not a valid IP address\n".to_string();
         }
     };
 
     // 2. Разбор списка тикеров
     let tickers: Vec<&str> = tickers_str.split(',').collect();
     if tickers.is_empty() {
-        return "ERROR: ticker list is empty\n".to_string();
+        return "ERROR: client ticker list is empty\n".to_string();
     }
+
+    let tickers_res = get_tickers_from_txt(crate::DEFAULT_TICKERS_PATH);
+    let Some(tickers_list) = tickers_res.ok() else {
+        return format!("ERROR: tickers list from the file {} is empty\n", DEFAULT_TICKERS_PATH);
+    };
+
     for ticker in &tickers {
         if ticker.is_empty() {
-            return "ERROR: ticker cannot be empty\n".to_string();
+            return "ERROR: client ticker cannot be empty\n".to_string();
         }
-        // Простейшая валидация: только буквы (можно расширить)
-        if !ticker.chars().all(|c| c.is_ascii_alphabetic()) {
-            return format!(
-                "ERROR: ticker '{}' contains invalid characters (only A-Za-z allowed)\n",
-                ticker
-            );
+        if !tickers_list.contains(*ticker) {
+            return format!("ERROR: file's tickers list doesnt contain client ticker {}\n", ticker);
         }
     }
 
