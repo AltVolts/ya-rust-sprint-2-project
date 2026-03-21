@@ -1,21 +1,21 @@
+use crate::client_registry::ClientRegistry;
+use crate::generators::QuoteGenerator;
 use crate::server::handle_client;
 use log::{error, info};
-use std::net::TcpListener;
+use quote_core::ticker_list::get_tickers_from_txt;
+use std::net::{TcpListener, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use crossbeam_channel::{bounded, unbounded};
-use quote_core::StockQuote;
-use quote_core::ticker_list::get_tickers_from_txt;
-use crate::generators::QuoteGenerator;
 
-mod sender;
-mod server;
+mod client_registry;
 pub mod generators;
+mod server;
 
-const DEFAULT_TICKERS_PATH: &str = "../../tickers.txt";
+const DEFAULT_TICKERS_PATH: &str = "tickers.txt";
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
+
     let tickers = get_tickers_from_txt(DEFAULT_TICKERS_PATH)?
         .into_iter()
         .collect();
@@ -26,17 +26,31 @@ fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&url)?;
     info!("Server started at {}", url);
 
-    let mut quote_gen = QuoteGenerator::new(tickers);
-    let (gen_tx, gen_rx) = bounded(100);
-    
-    thread::spawn(move || quote_gen.generator_thread(gen_tx));
+    let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
+    let udp_port = udp_socket.local_addr()?.port();
+    info!("UDP socket for pings bound to port {}", udp_port);
+    let udp_socket = Arc::new(udp_socket);
+
+    let client_registry = Arc::new(Mutex::new(ClientRegistry::new()));
+    let gen_registry = client_registry.clone();
+
+    let gen_handle = thread::spawn(move || {
+        let mut quote_gen = QuoteGenerator::new(gen_registry, tickers);
+        if let Err(e) = quote_gen.start_generation() {
+            error!("Generator stopped with error: {}", e);
+        }
+    });
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => handle_client(stream, quote_gen.clone()),
+            Ok(stream) => {
+                let registry = client_registry.clone();
+                let udp = udp_socket.clone();
+                thread::spawn(|| handle_client(stream, registry, udp));
+            }
             Err(e) => error!("Connection failed: {}!", e),
         }
     }
-
+    gen_handle.join().unwrap();
     Ok(())
 }

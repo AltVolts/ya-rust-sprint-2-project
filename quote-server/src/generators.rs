@@ -1,26 +1,24 @@
 use std::collections::HashMap;
-
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use quote_core::StockQuote;
-use anyhow::{anyhow, Result};
-use crossbeam_channel::Sender;
-use log::{error};
-use rand::rngs::{ ThreadRng};
-use rand::{Rng};
+use crate::client_registry::ClientRegistry;
+use anyhow::{Result, anyhow};
+use quote_core::{StockQuote, TickerPrices};
+use rand::Rng;
+use rand::rngs::ThreadRng;
 
-
-const TICKERS_FILE: &str = "../../tickers.txt";
 const GENERATOR_TICK_RATE: Duration = Duration::from_millis(100);
 
 pub(crate) struct QuoteGenerator {
-    tickers: Vec<String>,
+    client_registry: Arc<Mutex<ClientRegistry>>,
     prices: HashMap<String, f64>,
     rng: ThreadRng,
 }
 
 impl QuoteGenerator {
-    pub(crate) fn new(tickers: Vec<String>) -> Self {
+    pub(crate) fn new(client_registry: Arc<Mutex<ClientRegistry>>, tickers: Vec<String>) -> Self {
         let mut rng = rand::thread_rng();
         let mut prices = HashMap::new();
 
@@ -30,55 +28,81 @@ impl QuoteGenerator {
         }
 
         Self {
-            tickers,
+            client_registry,
             prices,
-            rng
+            rng,
         }
     }
 
-    pub fn generate_next_quote(&mut self) -> Result<StockQuote> {
-        let ticker_idx = self.rng.gen_range(0..self.tickers.len());
-        let ticker = self.tickers[ticker_idx].clone();
-
-        let last_price = self.prices.get_mut(&ticker).ok_or_else(|| anyhow!("Error of borrowing tickers price"))?;
+    fn generate_quote(&mut self, ticker: &str) -> Result<StockQuote> {
+        let last_price = self
+            .prices
+            .get_mut(&ticker.to_string())
+            .ok_or_else(|| anyhow!("Error of borrowing tickers price"))?;
         let change = self.rng.gen_range(-1.0..=1.0);
         *last_price += change;
         if *last_price < 0.01 {
             *last_price = 0.01;
         }
 
-        let volume = match ticker.as_str() {
+        let volume = match ticker {
             "AAPL" | "MSFT" | "TSLA" => 1000 + self.rng.gen_range(0..5000),
             _ => 100 + self.rng.gen_range(0..1000),
         };
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis() as u64;
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
 
         Ok(StockQuote {
-            ticker,
+            ticker: ticker.into(),
             price: *last_price,
             volume,
             timestamp,
         })
     }
 
-    pub fn generator_thread(&mut self, tx: Sender<StockQuote>) {
-        loop {
-            match self.generate_next_quote() {
-                Ok(quote) => {
-                    if let Err(e) = tx.send(quote) {
-                        error!("Generator send error: {}, stopping", e);
-                        break;
-                    }
-                }
-                Err(e) => {
-                    error!("Generator error: {}", e);
-                    break;
-                }
+    pub fn generate_all_quotes(&mut self) -> Result<TickerPrices> {
+        let mut result = TickerPrices::with_capacity(self.prices.len());
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+
+        for ticker in self.prices.clone().keys() {
+            let last_price = self.prices.get_mut(ticker).unwrap();
+            let change = self.rng.gen_range(-2.0..2.0);
+            *last_price += change;
+            if *last_price < 0.01 {
+                *last_price = 0.01;
             }
-            std::thread::sleep(GENERATOR_TICK_RATE);
+
+            let volume = match ticker.as_str() {
+                "AAPL" | "MSFT" | "TSLA" => 1000 + self.rng.gen_range(0..5000),
+                _ => 100 + self.rng.gen_range(0..1000),
+            };
+
+            result.insert(
+                ticker.to_string(),
+                StockQuote {
+                    ticker: ticker.clone(),
+                    price: *last_price,
+                    volume,
+                    timestamp: now,
+                },
+            );
+        }
+
+        Ok(result)
+    }
+
+    pub fn start_generation(&mut self) -> Result<()> {
+        loop {
+            let prices = self.generate_all_quotes()?;
+            let guard = self
+                .client_registry
+                .lock()
+                .map_err(|e| anyhow!("Failed to lock client registry: {}", e))?;
+            guard
+                .broadcast(&prices)
+                .map_err(|e| anyhow!("Broadcast failed: {}", e))?;
+
+            thread::sleep(GENERATOR_TICK_RATE);
         }
     }
 }

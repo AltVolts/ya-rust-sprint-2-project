@@ -1,4 +1,4 @@
 mod stocks;
 pub mod ticker_list;
 
-pub use stocks::StockQuote;
+pub use stocks::{StockQuote, TickerPrices, TickerPricesExt};
