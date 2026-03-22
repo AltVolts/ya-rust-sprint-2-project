@@ -1,0 +1,61 @@
+use anyhow::Result as AnyhowResult;
+use log::{error, info};
+use quote_core::{StockQuote, deserialize_quotes};
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::mpsc;
+use std::thread;
+
+type Stocks = Vec<StockQuote>;
+
+pub(crate) struct QuoteReceiver {
+    socket: UdpSocket,
+}
+
+impl QuoteReceiver {
+    pub fn new(bind_addr: SocketAddr) -> AnyhowResult<Self> {
+        let socket = UdpSocket::bind(bind_addr)?;
+        info!("Udp Receiver starts at {}", bind_addr);
+        Ok(Self { socket })
+    }
+
+    pub fn start_with_channel(
+        self,
+    ) -> (
+        thread::JoinHandle<()>,
+        mpsc::Receiver<(Stocks, std::net::SocketAddr)>,
+    ) {
+        let (tx, rx) = mpsc::channel();
+
+        let handle = thread::spawn(move || {
+            if let Err(e) = self.receive_loop_with_channel(tx) {
+                error!("Ошибка в receive_loop_with_channel: {}", e);
+            }
+        });
+
+        (handle, rx)
+    }
+
+    fn receive_loop_with_channel(self, tx: mpsc::Sender<(Stocks, SocketAddr)>) -> AnyhowResult<()> {
+        let mut buf = [0u8; 1024];
+
+        loop {
+            match self.socket.recv_from(&mut buf) {
+                Ok((size, src_addr)) => match deserialize_quotes(&buf[..size]) {
+                    Ok(quotes) => {
+                        if tx.send((quotes, src_addr)).is_err() {
+                            info!("Канал закрыт, завершение потока приёма");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Ошибка десериализации: {}", e);
+                    }
+                },
+                Err(e) => {
+                    error!("Ошибка получения данных: {}", e);
+                }
+            }
+        }
+        Ok(())
+    }
+}

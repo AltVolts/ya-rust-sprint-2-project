@@ -9,7 +9,7 @@ use quote_core::{StockQuote, TickerPrices};
 use rand::Rng;
 use rand::rngs::ThreadRng;
 
-const GENERATOR_TICK_RATE: Duration = Duration::from_millis(100);
+const GENERATOR_TICK_RATE: Duration = Duration::from_millis(2000);
 
 pub(crate) struct QuoteGenerator {
     client_registry: Arc<Mutex<ClientRegistry>>,

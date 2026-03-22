@@ -1,5 +1,7 @@
 use anyhow::Result;
+use log::info;
 use quote_core::TickerPrices;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -37,16 +39,21 @@ impl ClientRegistry {
 
     pub fn add_client(&mut self, client: ClientInfo) -> Result<()> {
         let client_addr = client.addr.clone();
-        self.clients
-            .insert(client.addr, client)
-            .ok_or_else(|| anyhow::anyhow!("Client {:?} already exists", client_addr))?;
-        Ok(())
+        match self.clients.entry(client_addr) {
+            Entry::Occupied(_) => Err(anyhow::anyhow!("Client {:?} already exists", client_addr)),
+            Entry::Vacant(entry) => {
+                entry.insert(client);
+                info!("Client {:?} added to registry", client_addr);
+                Ok(())
+            }
+        }
     }
 
     pub fn remove_client(&mut self, client_addr: SocketAddr) -> Result<()> {
         self.clients
             .remove(&client_addr)
             .ok_or_else(|| anyhow::anyhow!("Client {:?} not exists", client_addr))?;
+        info!("Client {:?} removed from registry", client_addr);
         Ok(())
     }
 

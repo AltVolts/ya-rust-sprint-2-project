@@ -1,8 +1,7 @@
 use crate::client_registry::{ClientInfo, ClientRegistry};
 use anyhow::{Result as AnyhowResult, anyhow};
 use log::{error, info, warn};
-use quote_core::ticker_list::get_tickers_from_txt;
-use quote_core::{TickerPrices, TickerPricesExt};
+use quote_core::{StockQuote, TickerPrices, serialize_quotes};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{SocketAddr, TcpStream, UdpSocket};
@@ -90,25 +89,27 @@ pub(crate) fn handle_client(
 
     let (tx, rx) = std::sync::mpsc::channel();
     let client = ClientInfo::new(udp_addr, tx);
-    let mut registry = match client_registry.lock() {
-        Ok(guard) => guard,
-        Err(e) => {
-            error!("Failed to lock client registry: {}", e);
+    {
+        let mut registry = match client_registry.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                error!("Failed to lock client registry: {}", e);
+                send_error(
+                    &mut writer,
+                    format!("internal server error - {e}\n").as_str(),
+                );
+                return;
+            }
+        };
+
+        if let Err(e) = registry.add_client(client) {
+            error!("Failed to add client to registry: {}", e);
             send_error(
                 &mut writer,
                 format!("internal server error - {e}\n").as_str(),
             );
             return;
         }
-    };
-
-    if let Err(e) = registry.add_client(client) {
-        error!("Failed to add client to registry: {}", e);
-        send_error(
-            &mut writer,
-            format!("internal server error - {e}\n").as_str(),
-        );
-        return;
     }
 
     let mut failed_count = 0;
@@ -139,7 +140,7 @@ pub(crate) fn handle_client(
             return;
         }
 
-        let encoded = match filtered_prices.serialize() {
+        let encoded = match serialize_quotes(filtered_prices) {
             Ok(encoded) => encoded,
             Err(e) => {
                 failed_count += 1;
@@ -158,10 +159,11 @@ pub(crate) fn handle_client(
     }
 }
 
-fn filter_prices(prices: TickerPrices, tickers_set: &HashSet<String>) -> TickerPrices {
+fn filter_prices(prices: TickerPrices, tickers_set: &HashSet<String>) -> Vec<StockQuote> {
     prices
         .into_iter()
         .filter(|(ticker, _)| tickers_set.contains(ticker))
+        .map(|(_, stock)| stock)
         .collect()
 }
 
@@ -210,26 +212,7 @@ fn handle_stream_cmd(mut parts: SplitWhitespace) -> AnyhowResult<(SocketAddr, Ha
     if tickers.is_empty() {
         return Err(anyhow!("client ticker list is empty"));
     }
+    let tickers_set: HashSet<String> = tickers.into_iter().map(|s| s.to_string()).collect();
 
-    let tickers_list = get_tickers_from_txt(crate::DEFAULT_TICKERS_PATH).map_err(|e| {
-        anyhow!(
-            "failed to read tickers from file {}: {}",
-            crate::DEFAULT_TICKERS_PATH,
-            e
-        )
-    })?;
-
-    for ticker in &tickers {
-        if ticker.is_empty() {
-            return Err(anyhow!("client ticker cannot be empty"));
-        }
-        if !tickers_list.contains(*ticker) {
-            return Err(anyhow!(
-                "file's tickers list doesn't contain client ticker {}",
-                ticker
-            ));
-        }
-    }
-
-    Ok((udp_addr, tickers_list))
+    Ok((udp_addr, tickers_set))
 }
