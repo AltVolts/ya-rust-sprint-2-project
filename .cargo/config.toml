@@ -1,0 +1,3 @@
+[alias]
+server = "run -p quote-server --"
+client = "run -p quote-client --"

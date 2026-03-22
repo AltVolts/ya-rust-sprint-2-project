@@ -24,6 +24,23 @@ impl StockQuote {
             timestamp,
         })
     }
+
+    pub fn header() -> String {
+        format!(
+            "{:<6} | {:>10} | {:>8} | {:>13}",
+            "Ticker", "Price", "Volume", "Timestamp",
+        )
+    }
+    pub fn separator() -> String {
+        "-".repeat(46)
+    }
+
+    pub fn to_string(&self) -> String {
+        format!(
+            "{:<6} | {:>10.2} | {:>8} | {:>13}",
+            self.ticker, self.price, self.volume, self.timestamp
+        )
+    }
 }
 
 impl Display for StockQuote {

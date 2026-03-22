@@ -23,7 +23,7 @@ impl Cli {
         info!("Сервер (TCP): {}", result.server_addr);
         info!("Клиент (UDP): {}", result.udp_port);
         info!(
-            "Файл с фильтром по интересующим тикерам: {:?}",
+            "Файл с фильтром по интересующим тикерам: {:?}\n",
             result.tickers_file
         );
 

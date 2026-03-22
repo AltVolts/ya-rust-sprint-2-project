@@ -11,6 +11,7 @@ use std::thread;
 mod client_registry;
 pub mod generators;
 mod handler;
+mod keep_alive;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
@@ -49,7 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(stream) => {
                 let registry = client_registry.clone();
                 let udp = udp_socket.clone();
-                thread::spawn(move || handle_client(stream, registry, udp));
+                thread::spawn(move || {
+                    if let Err(e) = handle_client(stream, registry, udp) {
+                        error!("Error while handling client: {}", e);
+                    }
+                });
             }
             Err(e) => error!("Connection failed: {}!", e),
         }

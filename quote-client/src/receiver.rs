@@ -1,11 +1,16 @@
+use crate::SHUTDOWN;
 use anyhow::Result as AnyhowResult;
 use log::{error, info};
 use quote_core::{StockQuote, deserialize_quotes};
 use std::net::{SocketAddr, UdpSocket};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 type Stocks = Vec<StockQuote>;
+
+const SOCKET_POLL_TIMEOUT_MS: u64 = 2000;
 
 pub(crate) struct QuoteReceiver {
     socket: UdpSocket,
@@ -14,7 +19,7 @@ pub(crate) struct QuoteReceiver {
 impl QuoteReceiver {
     pub fn new(bind_addr: SocketAddr) -> AnyhowResult<Self> {
         let socket = UdpSocket::bind(bind_addr)?;
-        info!("Udp Receiver starts at {}", bind_addr);
+        info!("Udp Receiver starts at {}\n", bind_addr);
         Ok(Self { socket })
     }
 
@@ -36,9 +41,16 @@ impl QuoteReceiver {
     }
 
     fn receive_loop_with_channel(self, tx: mpsc::Sender<(Stocks, SocketAddr)>) -> AnyhowResult<()> {
+        self.socket
+            .set_read_timeout(Some(Duration::from_millis(SOCKET_POLL_TIMEOUT_MS)))?;
         let mut buf = [0u8; 1024];
 
         loop {
+            if SHUTDOWN.load(Ordering::Relaxed) {
+                info!("Получен сигнал остановки, завершаем поток приёма");
+                break;
+            }
+
             match self.socket.recv_from(&mut buf) {
                 Ok((size, src_addr)) => match deserialize_quotes(&buf[..size]) {
                     Ok(quotes) => {
@@ -51,8 +63,16 @@ impl QuoteReceiver {
                         error!("Ошибка десериализации: {}", e);
                     }
                 },
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    continue;
+                }
                 Err(e) => {
                     error!("Ошибка получения данных: {}", e);
+                    SHUTDOWN.store(true, Ordering::Relaxed);
+                    break;
                 }
             }
         }

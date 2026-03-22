@@ -1,10 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result as AnyhowResult};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-/// Получить множество тикеров
-pub fn get_tickers_from_txt(path: &str) -> Result<HashSet<String>> {
+pub fn get_tickers_from_txt(path: &str) -> AnyhowResult<HashSet<String>> {
     let file = File::open(path).with_context(|| format!("Failed to open input file '{}'", path))?;
 
     let mut tickers = HashSet::new();

@@ -1,5 +1,5 @@
 use crate::client_registry::{ClientInfo, ClientRegistry};
-use anyhow::{Result as AnyhowResult, anyhow};
+use anyhow::{Context, Result as AnyhowResult, anyhow};
 use log::{error, info, warn};
 use quote_core::{StockQuote, TickerPrices, serialize_quotes};
 use std::collections::HashSet;
@@ -12,118 +12,96 @@ pub(crate) fn handle_client(
     stream: TcpStream,
     client_registry: Arc<Mutex<ClientRegistry>>,
     socket: Arc<UdpSocket>,
-) {
-    let writer = match stream.try_clone() {
-        Ok(w) => w,
-        Err(e) => {
-            error!("Failed to clone stream: {}", e);
-            return;
-        }
-    };
+) -> AnyhowResult<()> {
+    let writer = stream
+        .try_clone()
+        .with_context(|| "Failed to clone stream")?;
     let mut writer = BufWriter::new(writer);
     let mut reader = BufReader::new(stream);
 
-    if let Err(e) = writer.write_all(b"OK: You connected to quote-server server!\n") {
-        error!("Failed to send welcome message: {}", e);
-        return;
-    }
-    if let Err(e) = writer.flush() {
-        error!("Failed to flush welcome message: {}", e);
-        return;
-    }
+    writer
+        .write_all(b"OK: You connected to quote-server server!\n")
+        .with_context(|| "Failed to send welcome message")?;
+    writer
+        .flush()
+        .with_context(|| "Failed to flush welcome message")?;
 
     let mut line = String::new();
-    let n = match reader.read_line(&mut line) {
+    match reader.read_line(&mut line) {
         Ok(0) => {
             info!("Client disconnected");
-            return;
+            return Ok(());
         }
-        Ok(n) => n,
+        Ok(_) => {}
         Err(e) => {
             error!("Error reading from client: {}", e);
-            return;
+            return Err(anyhow!("Error reading from client: {}", e));
         }
-    };
+    }
+
     let input = line.trim();
     if input.is_empty() {
         info!("Client disconnected");
         send_error(&mut writer, "command is empty");
-        return;
+        return Ok(());
     }
 
-    let (command, parts) = match parse_command(input) {
-        Ok(cmd) => cmd,
-        Err(e) => {
-            error!("Failed to parse client command: {}", e);
-            send_error(&mut writer, &e.to_string());
-            return;
-        }
-    };
-    _ = match command {
+    let (command, parts) = parse_command(input).map_err(|e| {
+        error!("Failed to parse client command: {}", e);
+        send_error(&mut writer, &e.to_string());
+        anyhow!("Failed to parse client command: {}", e)
+    })?;
+
+    match command {
         "STREAM" => {}
         "EXIT" => {
             let message = "OK: goodbye\n";
-            if let Err(e) = writer.write_all(message.as_bytes()) {
-                error!("Failed to send error: {}", e);
-            }
-            if let Err(e) = writer.flush() {
-                error!("Failed to flush error: {}", e);
-            }
-            return;
+            writer
+                .write_all(message.as_bytes())
+                .with_context(|| "Failed to send goodbye")?;
+            writer.flush().with_context(|| "Failed to flush goodbye")?;
+            return Ok(());
         }
         _ => {
             let message = format!("ERROR: wrong command {}\n", command);
-            send_error(&mut writer, message.as_str());
-            return;
+            send_error(&mut writer, &message);
+            return Err(anyhow!("wrong command {}", command));
         }
-    };
+    }
 
-    let (udp_addr, tickers_set) = match handle_stream_cmd(parts) {
-        Ok(result) => result,
-        Err(e) => {
-            error!("Failed to parse client command: {}", e);
-            send_error(&mut writer, &e.to_string());
-            return;
-        }
-    };
+    let (udp_addr, tickers_set) = handle_stream_cmd(parts).map_err(|e| {
+        error!("Failed to parse client command: {}", e);
+        send_error(&mut writer, &e.to_string());
+        anyhow!("Failed to parse client command: {}", e)
+    })?;
 
     let (tx, rx) = std::sync::mpsc::channel();
     let client = ClientInfo::new(udp_addr, tx);
     {
-        let mut registry = match client_registry.lock() {
-            Ok(guard) => guard,
-            Err(e) => {
-                error!("Failed to lock client registry: {}", e);
-                send_error(
-                    &mut writer,
-                    format!("internal server error - {e}\n").as_str(),
-                );
-                return;
-            }
-        };
+        let mut registry = client_registry.lock().map_err(|e| {
+            error!("Failed to lock client registry: {}", e);
+            send_error(&mut writer, &format!("internal server error - {}\n", e));
+            anyhow!("Failed to lock client registry: {}", e)
+        })?;
 
-        if let Err(e) = registry.add_client(client) {
+        registry.add_client(client).map_err(|e| {
             error!("Failed to add client to registry: {}", e);
-            send_error(
-                &mut writer,
-                format!("internal server error - {e}\n").as_str(),
-            );
-            return;
-        }
+            send_error(&mut writer, &format!("internal server error - {}\n", e));
+            anyhow!("Failed to add client to registry: {}", e)
+        })?;
     }
 
     let mut failed_count = 0;
     loop {
         if failed_count > 10 {
-            error!("To much handle client errors");
-            client_registry
-                .lock()
-                .unwrap()
-                .remove_client(udp_addr)
-                .unwrap();
-            send_error(&mut writer, "ERROR: To much handle client errors");
-            return;
+            error!("Too many handle client errors");
+            if let Ok(mut registry) = client_registry.lock() {
+                let _ = registry.remove_client(udp_addr);
+            }
+            send_error(&mut writer, "ERROR: Too many handle client errors");
+            return Err(anyhow!("Too many handle client errors"));
         }
+
         let ticker_prices = match rx.recv() {
             Ok(ticker_prices) => ticker_prices,
             Err(e) => {
@@ -137,7 +115,7 @@ pub(crate) fn handle_client(
         if filtered_prices.is_empty() {
             error!("No tickers after client filtration");
             send_error(&mut writer, "ERROR: no tickers were found");
-            return;
+            return Err(anyhow!("No tickers after client filtration"));
         }
 
         let encoded = match serialize_quotes(filtered_prices) {
@@ -149,13 +127,13 @@ pub(crate) fn handle_client(
             }
         };
         match socket.send_to(&encoded, udp_addr) {
-            Ok(_) => n,
+            Ok(_) => {}
             Err(e) => {
                 failed_count += 1;
                 error!("Failed to send ticker prices: {}", e);
                 continue;
             }
-        };
+        }
     }
 }
 
@@ -200,9 +178,6 @@ fn handle_stream_cmd(mut parts: SplitWhitespace) -> AnyhowResult<(SocketAddr, Ha
         .ok_or_else(|| anyhow!("URL missing host"))?
         .to_string();
     let port = url.port().ok_or_else(|| anyhow!("URL missing port"))?;
-    if port == 0 || port > 65535 {
-        return Err(anyhow!("port out of range (1-65535)"));
-    }
 
     let udp_addr: SocketAddr = format!("{}:{}", host, port)
         .parse()
