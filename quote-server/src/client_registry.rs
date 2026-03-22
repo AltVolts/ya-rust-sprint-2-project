@@ -1,18 +1,18 @@
-use anyhow::Result;
+use anyhow::Result as AnyhowResult;
 use log::info;
 use quote_core::TickerPrices;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub type QuoteSender = std::sync::mpsc::Sender<TickerPrices>;
 
 type TickerSet = HashSet<String>;
 
 pub struct ClientInfo {
-    addr: SocketAddr,
-    last_ping: Instant,
+    pub addr: SocketAddr,
+    pub last_ping: Instant,
     pub sender: QuoteSender,
 }
 
@@ -23,6 +23,14 @@ impl ClientInfo {
             last_ping: Instant::now(),
             sender,
         }
+    }
+
+    pub fn update_ping(&mut self) {
+        self.last_ping = Instant::now();
+    }
+
+    pub fn is_expired(&self, timeout: Duration) -> bool {
+        self.last_ping.elapsed() > timeout
     }
 }
 
@@ -36,8 +44,17 @@ impl ClientRegistry {
             clients: HashMap::new(),
         }
     }
+    pub fn update_ping(&mut self, addr: SocketAddr) -> AnyhowResult<()> {
+        match self.clients.get_mut(&addr) {
+            Some(client) => {
+                client.update_ping();
+                Ok(())
+            }
+            None => Err(anyhow::anyhow!("Client {:?} not found in registry", addr)),
+        }
+    }
 
-    pub fn add_client(&mut self, client: ClientInfo) -> Result<()> {
+    pub fn add_client(&mut self, client: ClientInfo) -> AnyhowResult<()> {
         let client_addr = client.addr.clone();
         match self.clients.entry(client_addr) {
             Entry::Occupied(_) => Err(anyhow::anyhow!("Client {:?} already exists", client_addr)),
@@ -49,7 +66,7 @@ impl ClientRegistry {
         }
     }
 
-    pub fn remove_client(&mut self, client_addr: SocketAddr) -> Result<()> {
+    pub fn remove_client(&mut self, client_addr: SocketAddr) -> AnyhowResult<()> {
         self.clients
             .remove(&client_addr)
             .ok_or_else(|| anyhow::anyhow!("Client {:?} not exists", client_addr))?;
@@ -57,10 +74,18 @@ impl ClientRegistry {
         Ok(())
     }
 
-    pub fn broadcast(&self, prices: &TickerPrices) -> Result<()> {
+    pub fn broadcast(&self, prices: &TickerPrices) -> AnyhowResult<()> {
         for client in self.clients.values() {
             client.sender.send(prices.clone())?;
         }
         Ok(())
+    }
+
+    pub fn get_mut(&mut self, addr: &SocketAddr) -> Option<&mut ClientInfo> {
+        self.clients.get_mut(addr)
+    }
+
+    pub fn get(&self, addr: &SocketAddr) -> Option<&ClientInfo> {
+        self.clients.get(addr)
     }
 }

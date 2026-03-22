@@ -7,7 +7,7 @@ use quote_core::StockQuote;
 use std::io::Write;
 use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 mod cli;
@@ -17,19 +17,18 @@ mod receiver;
 
 const POLL_INTERVAL_MS: u64 = 2000;
 
-pub static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     Builder::from_env(Env::default().default_filter_or("debug")).init();
     let args = Cli::get_args();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
 
-    ctrlc::set_handler(|| {
-        SHUTDOWN.store(true, Ordering::Relaxed);
+    ctrlc::set_handler(move || {
+        shutdown_clone.store(true, Ordering::Relaxed);
         info!("Получен сигнал завершения, начинаем остановку...");
     })?;
 
     let mut stream = TcpStream::connect(args.server_addr)?;
-    // let mut reader = BufReader::new(stream.try_clone()?);
 
     let tickers_str = read_tickers_file(args.tickers_file)?;
 
@@ -40,11 +39,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!("Ошибка при закрытии TCP-соединения: {}", e);
     }
 
-    let quotes_receiver = QuoteReceiver::new(args.udp_port)?;
-    let (receive_handle, quotes_rx) = quotes_receiver.start_with_channel();
+    let quotes_receiver = QuoteReceiver::new(args.udp_port, shutdown.clone())?;
+    let udp_socket = quotes_receiver.get_socket_clone();
+    let (receive_handle, quotes_rx, server_addr_rx) =
+        quotes_receiver.start_with_channel_and_server_addr();
+
+    let server_addr = match server_addr_rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(addr) => addr,
+        Err(e) => {
+            error!("Не удалось получить адрес сервера: {}", e);
+            return Err(e.into());
+        }
+    };
+    let _ping_handle = keep_alive::start_ping_sender(udp_socket, server_addr, shutdown.clone());
 
     loop {
-        if SHUTDOWN.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Relaxed) {
             break;
         }
 
@@ -63,12 +73,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 print!("\n");
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                continue;
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(e) => {
                 error!("Ошибка получения из канала: {}", e);
-                SHUTDOWN.store(true, Ordering::Relaxed);
+                shutdown.store(true, Ordering::Relaxed);
                 break;
             }
         }

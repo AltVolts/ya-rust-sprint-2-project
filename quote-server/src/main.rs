@@ -1,6 +1,7 @@
 use crate::client_registry::ClientRegistry;
 use crate::generators::QuoteGenerator;
 use crate::handler::handle_client;
+use crate::keep_alive::start_ping_listener;
 use env_logger::{Builder, Env};
 use log::{error, info};
 use quote_core::ticker_list::get_tickers_from_txt;
@@ -37,13 +38,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client_registry = Arc::new(Mutex::new(ClientRegistry::new()));
     let gen_registry = client_registry.clone();
-
     let gen_handle = thread::spawn(move || {
         let mut quote_gen = QuoteGenerator::new(gen_registry, tickers);
         if let Err(e) = quote_gen.start_generation() {
             error!("Generator stopped with error: {}", e);
         }
     });
+
+    let ping_registry = client_registry.clone();
+    let ping_socket = udp_socket.clone();
+    let _ping_handle = start_ping_listener(ping_socket, ping_registry);
 
     for stream in listener.incoming() {
         match stream {
@@ -56,9 +60,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
             }
-            Err(e) => error!("Connection failed: {}!", e),
+            Err(e) => {
+                error!("Connection failed: {}!", e)
+            }
         }
     }
+
     gen_handle.join().unwrap();
     Ok(())
 }
