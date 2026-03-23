@@ -16,6 +16,7 @@ mod tcp_input;
 const PING_TIMEOUT: Duration = Duration::from_secs(5);
 const GENERATION_MAX_TIMEOUT: u64 = 500;
 
+/// Handle client tcp connections. Receives quotes from quote generator via channel and send quotes to client via udp socket
 pub(crate) fn handle_client(
     stream: TcpStream,
     client_registry: Arc<Mutex<ClientRegistry>>,
@@ -82,6 +83,7 @@ pub(crate) fn handle_client(
     Ok(())
 }
 
+/// Filter generator quote prices according to tickers list from client STREAM command
 fn filter_prices(prices: TickerPrices, tickers_set: &HashSet<String>) -> Vec<StockQuote> {
     prices
         .into_iter()

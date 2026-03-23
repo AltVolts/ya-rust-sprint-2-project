@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::str::SplitWhitespace;
 
+/// Get client command via tcp. Parse it to get udp address for sending quotes and ticker list for filtering them
 pub(super) fn handle_tcp_input(stream: TcpStream) -> AnyhowResult<(SocketAddr, HashSet<String>)> {
     let writer = stream
         .try_clone()
@@ -15,13 +16,6 @@ pub(super) fn handle_tcp_input(stream: TcpStream) -> AnyhowResult<(SocketAddr, H
             .with_context(|| "Failed to clone stream")?,
     );
 
-    writer
-        .write_all(b"OK: You connected to quote-server server!\n")
-        .with_context(|| "Failed to send welcome message")?;
-    writer
-        .flush()
-        .with_context(|| "Failed to flush welcome message")?;
-
     let mut line = String::new();
     match reader.read_line(&mut line) {
         Ok(0) => return Err(anyhow!("Client disconnected")),
@@ -32,7 +26,18 @@ pub(super) fn handle_tcp_input(stream: TcpStream) -> AnyhowResult<(SocketAddr, H
     }
 
     let input = line.trim();
-    parse_tcp_command(input)
+    match parse_tcp_command(input) {
+        Ok((socket_addr, ticker_list)) => {
+            writer.write_all("OK".as_bytes())?;
+            writer.flush()?;
+            Ok((socket_addr, ticker_list))
+        }
+        Err(e) => {
+            writer.write_all(format!("ERR {}", e).as_bytes())?;
+            writer.flush()?;
+            Err(anyhow!("Error while parsing TCP command: {}", e))
+        }
+    }
 }
 
 fn parse_tcp_command(input: &str) -> AnyhowResult<(SocketAddr, HashSet<String>)> {
@@ -51,7 +56,7 @@ fn parse_tcp_command(input: &str) -> AnyhowResult<(SocketAddr, HashSet<String>)>
     Ok((udp_addr, tickers_set))
 }
 
-fn parse_command(input: &str) -> AnyhowResult<(&str, SplitWhitespace)> {
+fn parse_command(input: &'_ str) -> AnyhowResult<(&'_ str, SplitWhitespace<'_>)> {
     let mut parts = input.split_whitespace();
     let command = parts.next().ok_or_else(|| anyhow!("command is empty"))?;
     Ok((command, parts))

@@ -63,7 +63,9 @@ impl QuoteReceiver {
                 Ok((size, src_addr)) => {
                     if !addr_sent {
                         if tx_addr.send(src_addr).is_err() {
-                            info!("Канал адреса закрыт, завершение потока приёма");
+                            info!(
+                                "Канал для отправки адреса сервера закрыт, завершение потока приёма"
+                            );
                             break;
                         }
                         addr_sent = true;
@@ -72,7 +74,9 @@ impl QuoteReceiver {
                     match deserialize_quotes(&buf[..size]) {
                         Ok(quotes) => {
                             if tx_quotes.send((quotes, src_addr)).is_err() {
-                                info!("Канал котировок закрыт, завершение потока приёма");
+                                info!(
+                                    "Канал для отправки котировок закрыт, завершение потока приёма"
+                                );
                                 break;
                             }
                         }

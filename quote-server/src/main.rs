@@ -31,12 +31,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(&url)?;
     info!("Server started at {}", url);
 
+    // Bind udp socket for quotes senders client threads and for keep-alive thread
     let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
     let udp_port = udp_socket.local_addr()?.port();
     info!("UDP socket bound to port {}", udp_port);
     let udp_socket = Arc::new(udp_socket);
 
     let client_registry = Arc::new(Mutex::new(ClientRegistry::new()));
+
     let gen_registry = client_registry.clone();
     let gen_handle = thread::spawn(move || {
         let mut quote_gen = QuoteGenerator::new(gen_registry, tickers);

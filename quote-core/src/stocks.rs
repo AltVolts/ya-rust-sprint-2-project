@@ -43,16 +43,6 @@ impl StockQuote {
     }
 }
 
-impl Display for StockQuote {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}: price={:.2}, volume={}, timestamp={}",
-            self.ticker, self.price, self.volume, self.timestamp
-        )
-    }
-}
-
 pub fn serialize_quotes(quotes: Vec<StockQuote>) -> bincode::Result<Vec<u8>> {
     bincode::serialize(&quotes)
 }
