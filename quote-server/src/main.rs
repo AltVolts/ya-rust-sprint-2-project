@@ -16,7 +16,7 @@ mod keep_alive;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
-    Builder::from_env(Env::default().default_filter_or("debug")).init();
+    Builder::from_env(Env::default().default_filter_or("info")).init();
 
     let serv_host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let serv_port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
