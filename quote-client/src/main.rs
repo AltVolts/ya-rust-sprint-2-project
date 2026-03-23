@@ -23,7 +23,7 @@ const POLL_INTERVAL_MS: u64 = 2000;
 const TCP_RESPONSE_MAX_TIMEOUT: u64 = 6000;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    Builder::from_env(Env::default().default_filter_or("debug")).init();
+    Builder::from_env(Env::default().default_filter_or("info")).init();
     let args = Cli::get_args();
 
     // Configure shutdown flag and ctrlc handler for graceful shutdown
@@ -105,9 +105,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("{}", StockQuote::header());
                 info!("{}", StockQuote::separator());
                 for stock in stocks {
-                    info!("{}", stock.to_string());
+                    info!("{}", stock);
                 }
-                print!("\n");
+                println!();
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(e) => {

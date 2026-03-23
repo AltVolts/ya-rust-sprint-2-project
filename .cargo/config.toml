@@ -1,3 +1,5 @@
 [alias]
 server = "run -p quote-server --"
+r-server = "run -p quote-server --release --"
 client = "run -p quote-client --"
+r-client = "run -p quote-client --release --"

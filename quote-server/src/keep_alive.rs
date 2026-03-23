@@ -1,5 +1,5 @@
 use crate::client_registry::ClientRegistry;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use std::thread;

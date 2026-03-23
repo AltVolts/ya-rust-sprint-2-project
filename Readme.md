@@ -26,11 +26,20 @@ It demonstrates practical use of multithreading, channels (MPMC), and TCP/UDP ne
 
 ## Command examples
 ### 1). Run server:
+
 ```shell
 cargo server
+```
+#### - run release build:
+```shell
+cargo r-server
 ```
 
 ### 2). Run client:
 ```shell
 cargo client --udp-port 127.0.0.1:45222 --tickers-file ./quote-client/client_tickers.txt
+```
+#### - run release build:
+```shell
+cargo r-client --udp-port 127.0.0.1:45222 --tickers-file ./quote-client/client_tickers.txt
 ```

@@ -1,14 +1,12 @@
 use anyhow::Result as AnyhowResult;
 use log::info;
 use quote_core::TickerPrices;
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 pub type QuoteSender = std::sync::mpsc::Sender<TickerPrices>;
-
-type TickerSet = HashSet<String>;
 
 pub struct ClientInfo {
     pub addr: SocketAddr,
@@ -44,18 +42,9 @@ impl ClientRegistry {
             clients: HashMap::new(),
         }
     }
-    pub fn update_ping(&mut self, addr: SocketAddr) -> AnyhowResult<()> {
-        match self.clients.get_mut(&addr) {
-            Some(client) => {
-                client.update_ping();
-                Ok(())
-            }
-            None => Err(anyhow::anyhow!("Client {:?} not found in registry", addr)),
-        }
-    }
 
     pub fn add_client(&mut self, client: ClientInfo) -> AnyhowResult<()> {
-        let client_addr = client.addr.clone();
+        let client_addr = client.addr;
         match self.clients.entry(client_addr) {
             Entry::Occupied(_) => Err(anyhow::anyhow!("Client {:?} already exists", client_addr)),
             Entry::Vacant(entry) => {

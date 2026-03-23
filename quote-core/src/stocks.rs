@@ -34,9 +34,12 @@ impl StockQuote {
     pub fn separator() -> String {
         "-".repeat(46)
     }
+}
 
-    pub fn to_string(&self) -> String {
-        format!(
+impl Display for StockQuote {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
             "{:<6} | {:>10.2} | {:>8} | {:>13}",
             self.ticker, self.price, self.volume, self.timestamp
         )

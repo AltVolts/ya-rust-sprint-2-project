@@ -34,32 +34,6 @@ impl QuoteGenerator {
         }
     }
 
-    fn generate_quote(&mut self, ticker: &str) -> Result<StockQuote> {
-        let last_price = self
-            .prices
-            .get_mut(&ticker.to_string())
-            .ok_or_else(|| anyhow!("Error of borrowing tickers price"))?;
-        let change = self.rng.gen_range(-1.0..=1.0);
-        *last_price += change;
-        if *last_price < 0.01 {
-            *last_price = 0.01;
-        }
-
-        let volume = match ticker {
-            "AAPL" | "MSFT" | "TSLA" => 1000 + self.rng.gen_range(0..5000),
-            _ => 100 + self.rng.gen_range(0..1000),
-        };
-
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-
-        Ok(StockQuote {
-            ticker: ticker.into(),
-            price: *last_price,
-            volume,
-            timestamp,
-        })
-    }
-
     pub fn generate_all_quotes(&mut self) -> Result<TickerPrices> {
         let mut result = TickerPrices::with_capacity(self.prices.len());
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
